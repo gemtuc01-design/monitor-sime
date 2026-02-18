@@ -18,8 +18,7 @@ jobs:
       - name: Instalar dependencias
         run: pip install selenium requests webdriver-manager
       
-      # CORRER BOT DE VACANTES (SIME)
-      # Este solo se ejecuta si es de Lunes a Viernes y en tus horas elegidas
+     # CORRER BOT DE VACANTES (SIME)
       - name: Ejecutar SIME
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
@@ -31,7 +30,7 @@ jobs:
           if [[ "$DIA" -le 5 && ("$HORA" == "11" || "$HORA" == "14" || "$HORA" == "17" || "$HORA" == "20" || "$HORA" == "23") ]]; then
             python bot_github.py
           else
-            print "Fuera de horario para SIME. Saltando..."
+            echo "Fuera de horario para SIME. Saltando..."
           fi
         shell: bash
 
