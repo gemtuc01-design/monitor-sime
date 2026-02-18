@@ -1,14 +1,12 @@
-name: Monitor SIME
+name: Monitor Docente Tucuman
 on:
   schedule:
-    # Corre a los minutos 0 de las horas 11, 14, 17, 20 y 23 (UTC)
-    # Que equivalen a 08, 11, 14, 17 y 20 hs (Argentina)
-    # Lunes a Viernes (1-5)
-    - cron: '0 11,14,17,20,23 * * 1-5'
-  workflow_dispatch: # Permite correrlo manual si quieres
+    # Corre cada 30 minutos todos los días para no perder cupos de cursos
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
 
 jobs:
-  run-bot:
+  run-bots:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -17,17 +15,38 @@ jobs:
       - uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-      - name: Instalar todo
+      - name: Instalar dependencias
         run: pip install selenium requests webdriver-manager
-      - name: Correr Bot
+      
+      # CORRER BOT DE VACANTES (SIME)
+      # Este solo se ejecuta si es de Lunes a Viernes y en tus horas elegidas
+      - name: Ejecutar SIME
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python bot_github.py
-      - name: Guardar cambios
+        run: |
+          HORA=$(date +%H)
+          DIA=$(date +%u)
+          # Solo corre de L-V (1-5) en tus horas UTC: 11, 14, 17, 20, 23
+          if [[ "$DIA" -le 5 && ("$HORA" == "11" || "$HORA" == "14" || "$HORA" == "17" || "$HORA" == "20" || "$HORA" == "23") ]]; then
+            python bot_github.py
+          else
+            print "Fuera de horario para SIME. Saltando..."
+          fi
+        shell: bash
+
+      # CORRER BOT DE CURSOS (FORMAR)
+      # Este corre siempre cada 30 minutos
+      - name: Ejecutar FORMAR
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python cursos_github.py
+
+      - name: Guardar cambios en memorias
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add vistos.txt
-          git commit -m "Actualizar vistos" || exit 0
+          git add vistos.txt cursos_vistos.txt
+          git commit -m "Actualizar memorias" || exit 0
           git push
