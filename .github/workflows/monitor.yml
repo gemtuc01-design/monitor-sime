@@ -1,14 +1,17 @@
 name: Monitor SIME
 on:
   schedule:
-    - cron: '*/20 * * * *'  # Cada 20 min
-  workflow_dispatch:        # Para poder probarlo a mano
+    # Corre a los minutos 0 de las horas 11, 14, 17, 20 y 23 (UTC)
+    # Que equivalen a 08, 11, 14, 17 y 20 hs (Argentina)
+    # Lunes a Viernes (1-5)
+    - cron: '0 11,14,17,20,23 * * 1-5'
+  workflow_dispatch: # Permite correrlo manual si quieres
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     permissions:
-      contents: write       # IMPORTANTE: Permiso para que el bot escriba en vistos.txt
+      contents: write
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4
