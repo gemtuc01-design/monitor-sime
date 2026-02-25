@@ -1,7 +1,9 @@
 import time
 import requests
 import os
-from datetime import datetime, timezone
+import json
+import re
+from datetime import datetime, timezone, timedelta
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
@@ -23,12 +25,41 @@ def normalizar(texto):
         t = t.replace(original, reemplazo)
     return t
 
+# Ajustamos la hora exacta de Argentina (UTC-3)
+ar_tz = timezone(timedelta(hours=-3))
+ahora_ar = datetime.now(ar_tz)
+
+# --- 1. CARGAMOS LAS MEMORIAS ---
 archivo_vistos = "vistos.txt"
 if os.path.exists(archivo_vistos):
     with open(archivo_vistos, "r") as f:
         vistos = set(line.strip() for line in f if line.strip())
 else:
     vistos = set()
+
+# Esta es la nueva "Agenda"
+archivo_agendados = "agendados.json"
+agendados =[]
+if os.path.exists(archivo_agendados):
+    with open(archivo_agendados, "r") as f:
+        try: agendados = json.load(f)
+        except: pass
+
+# --- 2. EL RECORDATORIO DE LAS 21:00 HS ---
+if ahora_ar.hour == 21:
+    mañana = ahora_ar + timedelta(days=1)
+    fecha_mañana = mañana.strftime("%d/%m/%Y") # Ejemplo: 12/02/2026
+    
+    for cargo in agendados:
+        # Si la fecha de mañana está dentro de las fechas que guardó el bot
+        if fecha_mañana in cargo.get("fechas",[]):
+            mensaje = (
+                f"⏰ <b>¡RECORDATORIO PARA MAÑANA!</b> ⏰\n\n"
+                f"Mañana (<b>{fecha_mañana}</b>) tenés que asistir o estar atento a esta designación:\n\n"
+                f"<code>{cargo['texto'][:500]}...</code>\n\n"
+                f"📍 Prepará todo. ¡Éxitos!"
+            )
+            enviar_telegram(mensaje)
 
 options = Options()
 options.add_argument("--headless")
@@ -38,7 +69,6 @@ options.add_argument("--disable-dev-shm-usage")
 driver = webdriver.Chrome(options=options)
 
 try:
-    # Usamos un bucle para procesar los detalles de a uno y no marear al navegador
     while True:
         driver.get(URL)
         wait = WebDriverWait(driver, 40)
@@ -52,25 +82,17 @@ try:
             texto_fila = fila.text.strip()
             texto_norm = normalizar(texto_fila)
             
-            # Buscamos Maestro de Grado
             if "PDVC-" in texto_norm and "MAESTRO DE GRADO" in texto_norm:
                 id_tramite = texto_fila.split()[0]
                 
                 if id_tramite not in vistos:
-                    print(f"Entrando al detalle de: {id_tramite}")
-                    
-                    # Buscamos el botón 'Ver Detalle' específico de esta fila
                     boton_detalle = fila.find_element(By.XPATH, ".//a[contains(text(), 'Ver Detalle')] | .//button[contains(text(), 'Ver Detalle')] | .//*[contains(text(), 'Ver Detalle')]")
                     driver.execute_script("arguments[0].click();", boton_detalle)
-                    
-                    # Esperamos a que cargue la página del detalle
                     time.sleep(4)
                     
-                    # Leemos TODO el texto que hay adentro del detalle
                     texto_detalle_original = driver.find_element(By.TAG_NAME, "body").text
                     texto_detalle_limpio = normalizar(texto_detalle_original)
                     
-                    # --- BÚSQUEDA DE TUS ESCUELAS EN EL DETALLE ---
                     es_prioridad = False
                     palabras_clave =["JAURETCHE", "CRUZ ALTA", "BANDA DEL RIO SALI", "EVA PERON"]
                     
@@ -80,44 +102,46 @@ try:
                     if es_prioridad:
                         mensaje = (
                             f"<b>🚨 ⭐ ¡ALERTA PRIORITARIA: TU ZONA! ⭐ 🚨</b>\n"
-                            f"📍 <i>Detectado en 'Ver Detalles' (Cruz Alta / Jauretche)</i>\n\n"
-                            f"<b>Información del Cargo:</b>\n<code>{texto_detalle_original[:600]}...</code>\n\n"
+                            f"📍 <i>Detectado en 'Ver Detalles'</i>\n\n"
+                            f"<code>{texto_detalle_original[:600]}...</code>\n\n"
                             f"🔗 <a href='{URL}'>¡POSTULATE YA! CLICK AQUÍ</a>"
                         )
+                        
+                        # Extraemos automáticamente las fechas del texto (DD/MM/YYYY)
+                        texto_completo = texto_fila + " " + texto_detalle_original
+                        fechas_encontradas = re.findall(r'\d{2}/\d{2}/\d{4}', texto_completo)
+                        
+                        # Lo guardamos en la agenda digital
+                        agendados.append({
+                            "id": id_tramite,
+                            "fechas": fechas_encontradas,
+                            "texto": texto_detalle_original
+                        })
                     else:
                         mensaje = (
                             f"<b>🍎 NUEVA VACANTE: MAESTRO DE GRADO</b>\n"
                             f"🆔 {id_tramite}\n\n"
-                            f"<b>Detalles Generales:</b>\n<code>{texto_detalle_original[:400]}...</code>\n\n"
+                            f"<code>{texto_detalle_original[:400]}...</code>\n\n"
                             f"🔗 <a href='{URL}'>Ir al SIME</a>"
                         )
                     
                     enviar_telegram(mensaje)
                     vistos.add(id_tramite)
                     procesado_alguno_nuevo = True
-                    
-                    # Salimos del FOR para recargar la página principal y seguir con el próximo
-                    # (Esto evita que el navegador se rompa al volver atrás)
                     break 
 
-        # Si recorrió todas las filas y no encontró nada nuevo, termina el ciclo
         if not procesado_alguno_nuevo:
             break
 
-    # Guardamos en la memoria todo lo que procesó
+    # Guardamos las memorias
     with open(archivo_vistos, "w") as f:
         for item in sorted(vistos):
             f.write(f"{item}\n")
-
-    # Check nocturno de estado (A las 20:00 hs de Argentina)
-    ahora_utc = datetime.now(timezone.utc)
-    if ahora_utc.hour == 23:
-        enviar_telegram(f"🌙 <b>Check Diario OK</b>\nBúsqueda profunda en 'Detalles' completada.\nVacantes guardadas: {len(vistos)}")
+            
+    with open(archivo_agendados, "w") as f:
+        json.dump(agendados, f)
 
 except Exception as e:
-    ahora_utc = datetime.now(timezone.utc)
-    if ahora_utc.hour == 23:
-        enviar_telegram(f"⚠️ <b>Check Diario:</b> Error: {e}")
     print(f"Error General: {e}")
 finally:
     driver.quit()
