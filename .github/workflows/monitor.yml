@@ -1,51 +1,13 @@
-name: Monitor Docente Tucuman
-on:
-  schedule:
-    # Corre cada 30 minutos todos los días para no perder cupos de cursos
-    - cron: '*/30 * * * *'
-  workflow_dispatch:
-
-jobs:
-  run-bots:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-      - name: Instalar dependencias
-        run: pip install selenium requests webdriver-manager
-      
-     # CORRER BOT DE VACANTES (SIME)
-      - name: Ejecutar SIME
+- name: Ejecutar SIME
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           HORA=$(date +%H)
-          DIA=$(date +%u)
-          # Solo corre de L-V (1-5) en tus horas UTC: 11, 14, 17, 20, 23
-          if [[ "$DIA" -le 5 && ("$HORA" == "11" || "$HORA" == "14" || "$HORA" == "17" || "$HORA" == "20" || "$HORA" == "23") ]]; then
+          # Corre en tus horas UTC: 00 (21hs AR), 11 (08hs AR), 14, 17, 20, 23
+          if [[ "$HORA" == "00" || "$HORA" == "11" || "$HORA" == "14" || "$HORA" == "17" || "$HORA" == "20" || "$HORA" == "23" ]]; then
             python bot_github.py
           else
             echo "Fuera de horario para SIME. Saltando..."
           fi
         shell: bash
-
-      # CORRER BOT DE CURSOS (FORMAR)
-      # Este corre siempre cada 30 minutos
-      - name: Ejecutar FORMAR
-        env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python cursos_github.py
-
-      - name: Guardar cambios en memorias
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add vistos.txt cursos_vistos.txt
-          git commit -m "Actualizar memorias" || exit 0
-          git push
