@@ -25,7 +25,7 @@ def normalizar(texto):
         t = t.replace(original, reemplazo)
     return t
 
-# --- CONFIGURACIÓN DE HORARIOS ---
+# --- HORARIO ARGENTINA ---
 ar_tz = timezone(timedelta(hours=-3))
 ahora_ar = datetime.now(ar_tz)
 
@@ -37,20 +37,19 @@ if os.path.exists(archivo_vistos):
 else:
     vistos = set()
 
-# Cargar la Agenda Digital
 archivo_agendados = "agendados.json"
 agendados =[]
 if os.path.exists(archivo_agendados):
-    with open(archivo_agendados, "r") as f:
-        try:
+    try:
+        with open(archivo_agendados, "r") as f:
             agendados = json.load(f)
-        except:
-            pass
+    except:
+        pass
 
-# --- RECORDATORIO (Se ejecuta a las 20:00 hs de Argentina) ---
+# --- RECORDATORIO (A las 20:00 hs AR revisa la agenda de mañana) ---
 if ahora_ar.hour == 20:
     mañana = ahora_ar + timedelta(days=1)
-    fecha_mañana = mañana.strftime("%d/%m/%Y") # Ejemplo: 27/02/2026
+    fecha_mañana = mañana.strftime("%d/%m/%Y")
     
     for cargo in agendados:
         if fecha_mañana in cargo.get("fechas",[]):
@@ -121,9 +120,8 @@ try:
                     enviar_telegram(mensaje)
                     vistos.add(id_tramite)
                     
-                    # --- GUARDAR EN AGENDA DIGITAL ---
+                    # --- GUARDAR EN AGENDA ---
                     texto_completo = texto_fila + " " + texto_detalle_original
-                    # Busca todas las fechas estilo 12/05/2026
                     fechas_encontradas = re.findall(r'\d{2}/\d{2}/\d{4}', texto_completo) 
                     
                     if fechas_encontradas:
@@ -139,7 +137,7 @@ try:
         if not procesado_alguno_nuevo:
             break
 
-    # Guardar Memorias
+    # Guardar archivos
     with open(archivo_vistos, "w") as f:
         for item in sorted(vistos):
             f.write(f"{item}\n")
@@ -147,7 +145,7 @@ try:
     with open(archivo_agendados, "w") as f:
         json.dump(agendados, f)
 
-    # Check Diario
+    # Check Diario a las 20hs AR (23hs UTC)
     ahora_utc = datetime.now(timezone.utc)
     if ahora_utc.hour == 23:
         enviar_telegram(f"🌙 <b>Check Diario OK</b>\nBúsqueda completada.\nAgendados: {len(agendados)}")
