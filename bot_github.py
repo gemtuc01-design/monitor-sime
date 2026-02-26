@@ -1,7 +1,9 @@
 import time
 import requests
 import os
-from datetime import datetime, timezone
+import json
+import re
+from datetime import datetime, timezone, timedelta
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
@@ -23,12 +25,43 @@ def normalizar(texto):
         t = t.replace(original, reemplazo)
     return t
 
+# --- CONFIGURACIÓN DE HORARIOS ---
+ar_tz = timezone(timedelta(hours=-3))
+ahora_ar = datetime.now(ar_tz)
+
+# --- CARGAR MEMORIAS ---
 archivo_vistos = "vistos.txt"
 if os.path.exists(archivo_vistos):
     with open(archivo_vistos, "r") as f:
         vistos = set(line.strip() for line in f if line.strip())
 else:
     vistos = set()
+
+# Cargar la Agenda Digital
+archivo_agendados = "agendados.json"
+agendados =[]
+if os.path.exists(archivo_agendados):
+    with open(archivo_agendados, "r") as f:
+        try:
+            agendados = json.load(f)
+        except:
+            pass
+
+# --- RECORDATORIO (Se ejecuta a las 20:00 hs de Argentina) ---
+if ahora_ar.hour == 20:
+    mañana = ahora_ar + timedelta(days=1)
+    fecha_mañana = mañana.strftime("%d/%m/%Y") # Ejemplo: 27/02/2026
+    
+    for cargo in agendados:
+        if fecha_mañana in cargo.get("fechas",[]):
+            mensaje_agenda = (
+                f"⏰ <b>¡RECORDATORIO PARA MAÑANA!</b> ⏰\n\n"
+                f"Mañana (<b>{fecha_mañana}</b>) tenés designación para este cargo:\n\n"
+                f"<code>{cargo['texto'][:400]}...</code>\n\n"
+                f"📍 ¡Prepará todo y muchos éxitos!"
+            )
+            enviar_telegram(mensaje_agenda)
+            time.sleep(2)
 
 options = Options()
 options.add_argument("--headless")
@@ -87,19 +120,37 @@ try:
                     
                     enviar_telegram(mensaje)
                     vistos.add(id_tramite)
+                    
+                    # --- GUARDAR EN AGENDA DIGITAL ---
+                    texto_completo = texto_fila + " " + texto_detalle_original
+                    # Busca todas las fechas estilo 12/05/2026
+                    fechas_encontradas = re.findall(r'\d{2}/\d{2}/\d{4}', texto_completo) 
+                    
+                    if fechas_encontradas:
+                        agendados.append({
+                            "id": id_tramite,
+                            "fechas": fechas_encontradas,
+                            "texto": texto_detalle_original
+                        })
+
                     procesado_alguno_nuevo = True
                     break 
 
         if not procesado_alguno_nuevo:
             break
 
+    # Guardar Memorias
     with open(archivo_vistos, "w") as f:
         for item in sorted(vistos):
             f.write(f"{item}\n")
+            
+    with open(archivo_agendados, "w") as f:
+        json.dump(agendados, f)
 
+    # Check Diario
     ahora_utc = datetime.now(timezone.utc)
     if ahora_utc.hour == 23:
-        enviar_telegram(f"🌙 <b>Check Diario OK</b>\nBúsqueda completada.\nVacantes guardadas: {len(vistos)}")
+        enviar_telegram(f"🌙 <b>Check Diario OK</b>\nBúsqueda completada.\nAgendados: {len(agendados)}")
 
 except Exception as e:
     print(f"Error General: {e}")
