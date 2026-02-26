@@ -1,4 +1,37 @@
-- name: Guardar cambios
+name: Monitor Docente Tucuman
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+jobs:
+  run-bots:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Instalar dependencias
+        run: pip install selenium requests webdriver-manager
+      
+      - name: Ejecutar SIME
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          HORA=$(date +%H)
+          DIA=$(date +%u)
+          if [[ "$DIA" -le 5 && ("$HORA" == "11" || "$HORA" == "14" || "$HORA" == "17" || "$HORA" == "20" || "$HORA" == "23") ]]; then
+            python bot_github.py
+          else
+            echo "Fuera de horario para SIME. Saltando..."
+          fi
+        shell: bash
+
+      - name: Guardar cambios en memorias
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
