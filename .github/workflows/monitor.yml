@@ -31,10 +31,10 @@ jobs:
           fi
         shell: bash
 
-      - name: Guardar cambios en memorias
+      - -name: Guardar cambios en memorias
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add vistos.txt agendados.json cursos_vistos.txt
+          git add vistos.txt agendados.json cursos_vistos.txt offset.txt
           git commit -m "Actualizar memorias" || exit 0
           git push
