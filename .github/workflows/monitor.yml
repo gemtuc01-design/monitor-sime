@@ -4,14 +4,18 @@ on:
     - cron: '*/30 * * * *'
   workflow_dispatch:
 
+# --- ESTO APAGA EL CARTEL AMARILLO PARA SIEMPRE ---
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   run-bots:
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4  # <--- ACTUALIZADO
-      - uses: actions/setup-python@v5 # <--- ACTUALIZADO
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
       - name: Instalar dependencias
