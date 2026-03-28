@@ -51,7 +51,21 @@ def get_driver():
     service = Service(ChromeDriverManager().install())
     return webdriver.Chrome(service=service, options=options)
 
-# --- MEMORIA DEL BOT DE CURSOS ---
+def scroll_completo(driver):
+    """Hace scroll hasta el fondo de la página para forzar la carga de todos los elementos."""
+    ultima_altura = driver.execute_script("return document.body.scrollHeight")
+    while True:
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        time.sleep(2)
+        nueva_altura = driver.execute_script("return document.body.scrollHeight")
+        if nueva_altura == ultima_altura:
+            break
+        ultima_altura = nueva_altura
+    # Volvemos arriba
+    driver.execute_script("window.scrollTo(0, 0);")
+    time.sleep(1)
+
+# --- MEMORIA ---
 archivo_vistos = "cursos_vistos.txt"
 if os.path.exists(archivo_vistos):
     with open(archivo_vistos, "r") as f:
@@ -59,7 +73,7 @@ if os.path.exists(archivo_vistos):
 else:
     vistos = set()
 
-print("🚀 Bot Cursos iniciado (modo GitHub Actions — una sola pasada)...")
+print("🚀 Bot Cursos iniciado...")
 
 driver = None
 nuevos_encontrados = 0
@@ -70,74 +84,103 @@ try:
 
     wait = WebDriverWait(driver, 30)
     wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-    time.sleep(5)
 
-    # Buscamos todos los enlaces a cursos específicos
+    # Esperamos que cargue el JS inicial
+    time.sleep(8)
+
+    # Scroll completo para que carguen todos los cursos (lazy loading)
+    print("📜 Haciendo scroll para cargar todos los cursos...")
+    scroll_completo(driver)
+
+    # Buscamos enlaces con el patrón correcto: /capacitaciones/{ID}/
+    # Ejemplo: /capacitaciones/bmg6aX1M/nombre-del-curso
     enlaces = driver.find_elements(By.XPATH, "//a[contains(@href, '/capacitaciones/')]")
-    urls_cursos = set(e.get_attribute("href") for e in enlaces if e.get_attribute("href"))
-    print(f"📋 Cursos encontrados en el portal: {len(urls_cursos)}")
+    
+    # Usamos el ID (segundo segmento) como clave única, ignorando el slug de texto
+    urls_por_id = {}
+    for e in enlaces:
+        href = e.get_attribute("href") or ""
+        match = re.search(r'/capacitaciones/([^/?#]+)', href)
+        if match:
+            id_curso = match.group(1)
+            # Normalizamos la URL quitando el hash (#) del final si lo tiene
+            url_limpia = href.split('#')[0]
+            urls_por_id[id_curso] = url_limpia
 
-    for url_curso in urls_cursos:
-        match_id = re.search(r'/capacitaciones/([^/?#]+)', url_curso)
-        id_curso = match_id.group(1) if match_id else url_curso.split('/')[-1][:20]
+    print(f"📋 Cursos únicos encontrados: {len(urls_por_id)}")
+    for id_c, url_c in list(urls_por_id.items())[:10]:
+        print(f"   [{id_c}] {url_c}")
 
-        if id_curso not in vistos:
-            print(f"🔍 Revisando curso nuevo: {id_curso}")
-            try:
-                driver.get(url_curso)
-                time.sleep(4)
+    if len(urls_por_id) == 0:
+        body_preview = driver.find_element(By.TAG_NAME, "body").text[:400]
+        print(f"⚠️ Sin cursos. Vista previa del body:\n{body_preview}")
+        enviar_mensaje_telegram(
+            f"⚠️ <b>Bot Cursos:</b> No se encontraron cursos en el portal.\n\n"
+            f"<i>Vista previa:</i>\n<code>{body_preview[:300]}</code>"
+        )
 
-                texto_pagina = driver.find_element(By.TAG_NAME, "body").text
-                texto_norm = normalizar(texto_pagina)
+    for id_curso, url_curso in urls_por_id.items():
 
-                # FILTRO: Solo nivel Primario
-                if "PRIMARI" in texto_norm:
+        if id_curso in vistos:
+            continue
 
-                    # Título
-                    try:
-                        titulo = driver.find_element(By.TAG_NAME, "h1").text.strip()
-                        if not titulo:
-                            raise ValueError("h1 vacío")
-                    except:
-                        titulo = "Curso de Capacitación"
+        print(f"🔍 Revisando curso nuevo: {id_curso}")
+        try:
+            driver.get(url_curso)
+            time.sleep(5)
 
-                    # Inicio Preinscripción
-                    match_inicio = re.search(
-                        r'Inicio\s+Preinscripci[oó]n\s*[:\-]?\s*([\d/\s:\w]+?hs)',
-                        texto_pagina, re.IGNORECASE
-                    )
-                    inicio_pre = match_inicio.group(1).strip() if match_inicio else "¡Revisar en la web!"
+            texto_pagina = driver.find_element(By.TAG_NAME, "body").text
+            texto_norm = normalizar(texto_pagina)
 
-                    # Estado
-                    match_estado = re.search(r'Estado\s*[:\-]?\s*([A-Za-záéíóúÁÉÍÓÚ\s]+)', texto_pagina)
-                    estado = match_estado.group(1).strip() if match_estado else "Desconocido"
+            # FILTRO: Solo nivel Primario
+            if "PRIMARI" in texto_norm:
 
-                    mensaje = (
-                        f"<b>🎓 ¡NUEVO CURSO INFoD / FORMAR!</b>\n\n"
-                        f"📚 <b>{titulo}</b>\n\n"
-                        f"🎯 <b>Nivel detectado:</b> Primario\n"
-                        f"🗓️ <b>Apertura de Inscripción:</b>\n<code>{inicio_pre}</code>\n"
-                        f"📊 <b>Estado:</b> <i>{estado}</i>\n\n"
-                        f"🔗 <a href='{url_curso}'>¡ENTRAR AL CURSO ACÁ!</a>"
-                    )
+                # Título
+                try:
+                    titulo = driver.find_element(By.TAG_NAME, "h1").text.strip() or "Curso de Capacitación"
+                except:
+                    titulo = "Curso de Capacitación"
 
-                    enviar_mensaje_telegram(mensaje)
-                    nuevos_encontrados += 1
-                    print(f"✅ Notificado: {titulo}")
-                else:
-                    print(f"⏭️  Curso {id_curso} no es de nivel Primario, descartado.")
+                # Inicio Preinscripción
+                match_inicio = re.search(
+                    r'Inicio\s+Preinscripci[oó]n\s*[:\-]?\s*([\d/\s:\w]+?hs)',
+                    texto_pagina, re.IGNORECASE
+                )
+                inicio_pre = match_inicio.group(1).strip() if match_inicio else "¡Revisar en la web!"
 
-            except Exception as e_curso:
-                print(f"⚠️ Error procesando curso {id_curso}: {e_curso}")
+                # Estado
+                match_estado = re.search(
+                    r'Estado\s*[:\-]?\s*([A-Za-záéíóúÁÉÍÓÚ\s]{3,30})',
+                    texto_pagina
+                )
+                estado = match_estado.group(1).strip() if match_estado else "Desconocido"
 
-            # Marcar como visto siempre (sea Primario o no)
-            vistos.add(id_curso)
+                mensaje = (
+                    f"<b>🎓 ¡NUEVO CURSO INFoD / FORMAR!</b>\n\n"
+                    f"📚 <b>{titulo}</b>\n\n"
+                    f"🎯 <b>Nivel detectado:</b> Primario\n"
+                    f"🗓️ <b>Apertura de Inscripción:</b>\n<code>{inicio_pre}</code>\n"
+                    f"📊 <b>Estado:</b> <i>{estado}</i>\n\n"
+                    f"🔗 <a href='{url_curso}'>¡ENTRAR AL CURSO ACÁ!</a>"
+                )
+                enviar_mensaje_telegram(mensaje)
+                nuevos_encontrados += 1
+                print(f"✅ Notificado: {titulo}")
+
+            else:
+                print(f"⏭️  Curso {id_curso} no es nivel Primario, descartado.")
+
+        except Exception as e_curso:
+            print(f"⚠️ Error procesando curso {id_curso}: {e_curso}")
+
+        # Siempre marcamos como visto
+        vistos.add(id_curso)
 
     print(f"✅ Revisión completa. Nuevos cursos Primario notificados: {nuevos_encontrados}")
 
 except Exception as e:
     print(f"❌ Error en bot de cursos: {e}")
-    enviar_telegram(f"⚠️ <b>Error en bot Cursos:</b> <code>{e}</code>")
+    enviar_mensaje_telegram(f"⚠️ <b>Error en bot Cursos:</b> <code>{e}</code>")
 
 finally:
     if driver:
