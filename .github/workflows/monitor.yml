@@ -2,8 +2,8 @@ name: Monitor Docente Tucuman
 
 on:
   schedule:
-    - cron: '*/30 * * * *'
-  workflow_dispatch:
+    - cron: '*/30 * * * *'   # Monitoreo continuo cada 30 min
+  workflow_dispatch:           # Ejecución manual desde GitHub
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -24,8 +24,8 @@ jobs:
       - name: Instalar dependencias
         run: pip install selenium requests webdriver-manager
 
-      # ── Bot SIME (vacantes Maestro de Grado) ──────────────────────────────
-      # Se ejecuta solo en días hábiles (lun-vie) en las horas configuradas
+      # ── Bot SIME (vacantes Maestro de Grado — alerta inmediata) ──────────
+      # Días hábiles, en las horas configuradas
       - name: Ejecutar SIME
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
@@ -42,7 +42,7 @@ jobs:
         shell: bash
 
       # ── Bot Cursos (capacitación docente nivel Primario) ──────────────────
-      # Se ejecuta en TODAS las corridas (cada 30 min, todos los días)
+      # Corre en todas las ejecuciones
       - name: Ejecutar Cursos
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
@@ -50,6 +50,23 @@ jobs:
         run: |
           echo "✅ Ejecutando bot Cursos..."
           python cursos_github.py
+
+      # ── Resumen Semanal SIME (lunes 08:00 hora Argentina) ────────────────
+      # UTC-3 = Argentina. Lunes 08:00 ART → 11:00 UTC → HORA=11, DIA=1
+      - name: Resumen Semanal SIME
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          HORA=$(date +%H)
+          DIA=$(date +%u)
+          if [[ "$DIA" == "1" && "$HORA" == "11" ]]; then
+            echo "✅ Ejecutando resumen semanal..."
+            python resumen_semanal.py
+          else
+            echo "⏭️  No es lunes a las 08hs. Saltando resumen semanal..."
+          fi
+        shell: bash
 
       # ── Guardar memorias en el repositorio ───────────────────────────────
       - name: Guardar cambios en memorias
