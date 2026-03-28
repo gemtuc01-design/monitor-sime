@@ -9,14 +9,39 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 
-# --- CONFIGURACIÓN (siempre desde variables de entorno) ---
-TOKEN = os.getenv("TELEGRAM_TOKEN")
+# --- CONFIGURACIÓN ---
+TOKEN   = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-URL = "https://sime.educaciontuc.gov.ar/Vacantes/Index#no-back-button"
+URL     = "https://sime.educaciontuc.gov.ar/Vacantes/Index#no-back-button"
 
 if not TOKEN or not CHAT_ID:
-    print("❌ ERROR: Faltan las variables de entorno TELEGRAM_TOKEN o TELEGRAM_CHAT_ID")
+    print("❌ ERROR: Faltan TELEGRAM_TOKEN o TELEGRAM_CHAT_ID")
     exit(1)
+
+# ── Filtros ──────────────────────────────────────────────────────────────────
+CARGO = "MAESTRO DE GRADO"
+TURNO = "MAÑANA"
+CABECERAS = [
+    "CRUZ ALTA",
+    "BANDA DEL RIO SALI",
+    "BANDA DEL RÍO SALÍ",
+    "BURRUYACU",
+    "BURRUYACÚ",
+    "MARCOS PAZ",
+    "COLOMBRES",
+    "DR MARCOS PAZ 1425",
+    "RAUL COLOMBRES",
+    "RAÚL COLOMBRES",
+]
+# ─────────────────────────────────────────────────────────────────────────────
+
+def normalizar(texto):
+    tabla = str.maketrans("ÁÉÍÓÚÜáéíóúü", "AEIOUUaeiouu")
+    return texto.upper().translate(tabla)
+
+CARGO_N     = normalizar(CARGO)
+TURNO_N     = normalizar(TURNO)
+CABECERAS_N = [normalizar(c) for c in CABECERAS]
 
 def enviar_telegram(mensaje):
     url_api = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
@@ -27,7 +52,7 @@ def enviar_telegram(mensaje):
             timeout=10
         )
         if not r.ok:
-            print(f"⚠️ Telegram respondió con error: {r.text}")
+            print(f"⚠️ Telegram error: {r.text}")
     except Exception as e:
         print(f"Error Telegram: {e}")
 
@@ -47,7 +72,7 @@ def get_driver():
     service = Service(ChromeDriverManager().install())
     return webdriver.Chrome(service=service, options=options)
 
-# --- MEMORIA: cargamos los ya vistos ---
+# --- MEMORIA ---
 archivo_vistos = "sime_vistos.txt"
 if os.path.exists(archivo_vistos):
     with open(archivo_vistos, "r") as f:
@@ -55,10 +80,10 @@ if os.path.exists(archivo_vistos):
 else:
     vistos = set()
 
-print("🚀 Bot SIME iniciado (modo GitHub Actions — una sola pasada)...")
+print("🚀 Bot SIME iniciado...")
 
 driver = None
-nuevos_encontrados = 0
+nuevos = 0
 
 try:
     driver = get_driver()
@@ -69,34 +94,56 @@ try:
     time.sleep(5)
 
     filas = driver.find_elements(By.CSS_SELECTOR, "table tbody tr")
-    print(f"📋 Filas encontradas en la tabla: {len(filas)}")
+    print(f"📋 Filas en tabla: {len(filas)}")
 
     for fila in filas:
         texto = fila.text.strip()
-        texto_upper = texto.upper()
+        if not texto:
+            continue
+        t = normalizar(texto)
 
-        # FILTRO: vacante PDVC y Maestro de Grado
-        if "PDVC-" in texto_upper and "MAESTRO DE GRADO" in texto_upper:
-            id_tramite = texto.split()[0]
+        # Filtro 1: vacante PDVC
+        if "PDVC-" not in t:
+            continue
 
-            if id_tramite not in vistos:
-                print(f"✨ ¡MAESTRO DE GRADO DETECTADO!: {id_tramite}")
+        # Filtro 2: Maestro de Grado
+        if CARGO_N not in t:
+            continue
 
-                mensaje = (
-                    f"<b>🍎 ¡NUEVA VACANTE: MAESTRO DE GRADO!</b>\n\n"
-                    f"<code>{texto}</code>\n\n"
-                    f"🔗 <a href='{URL}'>Ir al SIME</a>"
-                )
+        # Filtro 3: Turno Mañana
+        if TURNO_N not in t:
+            continue
 
-                enviar_telegram(mensaje)
-                vistos.add(id_tramite)
-                nuevos_encontrados += 1
-                time.sleep(2)
+        # Filtro 4: cabecera de interés
+        cabecera_match = next((c for c in CABECERAS_N if c in t), None)
+        if not cabecera_match:
+            continue
 
-    print(f"✅ Revisión SIME completa. Nuevas vacantes notificadas: {nuevos_encontrados}")
+        # ID único = primer token (ej: PDVC-123456)
+        id_tramite = texto.split()[0]
+
+        if id_tramite in vistos:
+            continue
+
+        print(f"✨ NUEVA VACANTE detectada: {id_tramite} | {cabecera_match}")
+
+        mensaje = (
+            f"<b>🍎 ¡NUEVA VACANTE: MAESTRO DE GRADO!</b>\n\n"
+            f"📋 <code>{texto}</code>\n\n"
+            f"📍 <b>Cabecera:</b> {cabecera_match}\n"
+            f"🌅 <b>Turno:</b> Mañana\n\n"
+            f"🔗 <a href='{URL}'>Ir al SIME</a>"
+        )
+
+        enviar_telegram(mensaje)
+        vistos.add(id_tramite)
+        nuevos += 1
+        time.sleep(2)
+
+    print(f"✅ Revisión completa. Nuevas vacantes notificadas: {nuevos}")
 
 except Exception as e:
-    print(f"❌ Error leyendo SIME: {e}")
+    print(f"❌ Error SIME: {e}")
     enviar_telegram(f"⚠️ <b>Error en bot SIME:</b> <code>{e}</code>")
 
 finally:
