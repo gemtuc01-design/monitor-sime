@@ -12,23 +12,41 @@ from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 
 # --- CONFIGURACIÓN ---
-TOKEN = os.getenv("TELEGRAM_TOKEN")
+TOKEN   = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-URL = "https://sime.educaciontuc.gov.ar/Vacantes/Index#no-back-button"
-
-# Cargos a monitorear (agregá más si necesitás)
-CARGOS_BUSCADOS = [
-    "MAESTRO DE GRADO",
-]
+URL     = "https://sime.educaciontuc.gov.ar/Vacantes/Index#no-back-button"
 
 if not TOKEN or not CHAT_ID:
-    print("❌ ERROR: Faltan las variables de entorno TELEGRAM_TOKEN o TELEGRAM_CHAT_ID")
+    print("❌ ERROR: Faltan TELEGRAM_TOKEN o TELEGRAM_CHAT_ID")
     exit(1)
 
+# ── Filtros (idénticos al bot principal) ─────────────────────────────────────
+CARGO = "MAESTRO DE GRADO"
+TURNO = "MAÑANA"
+CABECERAS = [
+    "CRUZ ALTA",
+    "BANDA DEL RIO SALI",
+    "BANDA DEL RÍO SALÍ",
+    "BURRUYACU",
+    "BURRUYACÚ",
+    "MARCOS PAZ",
+    "COLOMBRES",
+    "DR MARCOS PAZ 1425",
+    "RAUL COLOMBRES",
+    "RAÚL COLOMBRES",
+]
+# ─────────────────────────────────────────────────────────────────────────────
+
+def normalizar(texto):
+    tabla = str.maketrans("ÁÉÍÓÚÜáéíóúü", "AEIOUUaeiouu")
+    return texto.upper().translate(tabla)
+
+CARGO_N     = normalizar(CARGO)
+TURNO_N     = normalizar(TURNO)
+CABECERAS_N = [normalizar(c) for c in CABECERAS]
+
 def enviar_telegram(mensaje):
-    """Envía un mensaje a Telegram. Si supera los 4096 chars lo parte en trozos."""
     url_api = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    # Telegram tiene límite de 4096 caracteres por mensaje
     MAX = 4000
     partes = [mensaje[i:i+MAX] for i in range(0, len(mensaje), MAX)]
     for parte in partes:
@@ -39,8 +57,8 @@ def enviar_telegram(mensaje):
                 timeout=10
             )
             if not r.ok:
-                print(f"⚠️ Telegram respondió con error: {r.text}")
-            time.sleep(1)  # pequeña pausa entre mensajes
+                print(f"⚠️ Telegram error: {r.text}")
+            time.sleep(1)
         except Exception as e:
             print(f"Error Telegram: {e}")
 
@@ -60,21 +78,16 @@ def get_driver():
     service = Service(ChromeDriverManager().install())
     return webdriver.Chrome(service=service, options=options)
 
-# ─────────────────────────────────────────────
-# BARRIDO COMPLETO
-# ─────────────────────────────────────────────
-print("🔍 Iniciando barrido semanal del SIME...")
+# ─────────────────────────────────────────────────────────────────────────────
+print("🔍 Iniciando resumen semanal SIME...")
+
+hoy    = datetime.now()
+lunes  = hoy - timedelta(days=hoy.weekday())
+domingo = lunes + timedelta(days=6)
+rango  = f"{lunes.strftime('%d/%m')} al {domingo.strftime('%d/%m/%Y')}"
 
 driver = None
-# Diccionario: cargo → lista de filas encontradas
-resultados = defaultdict(list)
-total_filas = 0
-
-# Calculamos el rango de la semana para el encabezado
-hoy = datetime.now()
-lunes = hoy - timedelta(days=hoy.weekday())
-domingo = lunes + timedelta(days=6)
-rango_semana = f"{lunes.strftime('%d/%m')} al {domingo.strftime('%d/%m/%Y')}"
+por_cabecera = defaultdict(list)
 
 try:
     driver = get_driver()
@@ -85,73 +98,61 @@ try:
     time.sleep(5)
 
     filas = driver.find_elements(By.CSS_SELECTOR, "table tbody tr")
-    total_filas = len(filas)
-    print(f"📋 Total de filas en la tabla: {total_filas}")
+    print(f"📋 Total filas: {len(filas)}")
 
     for fila in filas:
         texto = fila.text.strip()
         if not texto:
             continue
-        texto_upper = texto.upper()
+        t = normalizar(texto)
 
-        # Solo procesamos vacantes (PDVC-)
-        if "PDVC-" not in texto_upper:
+        if "PDVC-" not in t:
+            continue
+        if CARGO_N not in t:
+            continue
+        if TURNO_N not in t:
             continue
 
-        # Clasificamos por cargo buscado
-        for cargo in CARGOS_BUSCADOS:
-            if cargo in texto_upper:
-                resultados[cargo].append(texto)
-                break  # una fila solo cuenta para un cargo
+        cabecera_match = next((c for c in CABECERAS_N if c in t), None)
+        if not cabecera_match:
+            continue
 
-    print(f"✅ Barrido completo.")
-    for cargo, items in resultados.items():
-        print(f"   {cargo}: {len(items)} vacante(s)")
+        por_cabecera[cabecera_match].append(texto)
 
 except Exception as e:
-    print(f"❌ Error durante el barrido: {e}")
-    enviar_telegram(f"⚠️ <b>Error en resumen semanal SIME:</b>\n<code>{e}</code>")
+    print(f"❌ Error: {e}")
+    enviar_telegram(f"⚠️ <b>Error en resumen semanal:</b> <code>{e}</code>")
     exit(1)
-
 finally:
     if driver:
         driver.quit()
 
-# ─────────────────────────────────────────────
-# ARMAR Y ENVIAR EL MENSAJE
-# ─────────────────────────────────────────────
-total_vacantes = sum(len(v) for v in resultados.values())
+# ── Armar mensaje ─────────────────────────────────────────────────────────────
+total = sum(len(v) for v in por_cabecera.values())
 
-# Encabezado
 mensaje = (
     f"<b>📊 RESUMEN SEMANAL SIME</b>\n"
-    f"🗓️ Semana del {rango_semana}\n"
-    f"🕐 Generado: {hoy.strftime('%d/%m/%Y %H:%M')} hs\n"
+    f"🗓️ Semana del {rango}\n"
+    f"🕐 {hoy.strftime('%d/%m/%Y %H:%M')} hs\n"
+    f"🎯 Maestro de Grado | Turno Mañana\n"
     f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
 )
 
-if total_vacantes == 0:
-    mensaje += "😴 <i>No se encontraron vacantes para los cargos monitoreados esta semana.</i>\n"
+if total == 0:
+    mensaje += "😴 <i>Sin vacantes para las cabeceras seleccionadas esta semana.</i>\n"
 else:
-    for cargo in CARGOS_BUSCADOS:
-        vacantes = resultados.get(cargo, [])
-        emoji = "🍎" if "MAESTRO DE GRADO" in cargo else "📌"
-        mensaje += f"{emoji} <b>{cargo}</b> — {len(vacantes)} vacante(s)\n"
+    for cab in sorted(por_cabecera.keys()):
+        items = por_cabecera[cab]
+        mensaje += f"📍 <b>{cab}</b> — {len(items)} vacante(s)\n"
         mensaje += "─────────────────────\n"
+        for v in items:
+            mensaje += f"<code>{v}</code>\n\n"
 
-        if vacantes:
-            for v in vacantes:
-                # Mostramos la fila en formato código para que sea legible
-                mensaje += f"<code>{v}</code>\n\n"
-        else:
-            mensaje += "<i>Sin vacantes esta semana.</i>\n\n"
-
-# Pie
 mensaje += (
     f"━━━━━━━━━━━━━━━━━━━━━━\n"
-    f"📌 <b>Total vacantes encontradas:</b> {total_vacantes}\n"
+    f"📌 <b>Total:</b> {total} vacante(s)\n"
     f"🔗 <a href='{URL}'>Ver SIME completo</a>"
 )
 
 enviar_telegram(mensaje)
-print(f"📨 Resumen enviado a Telegram. Total vacantes: {total_vacantes}")
+print(f"📨 Resumen enviado. Total vacantes: {total}")
