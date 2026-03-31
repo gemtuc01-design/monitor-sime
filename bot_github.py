@@ -21,10 +21,10 @@ from webdriver_manager.chrome import ChromeDriverManager
 # ── Config ────────────────────────────────────────────────────────────────────
 TOKEN   = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-URL_BASE    = "https://sime.educaciontuc.gov.ar"
-URL_LISTA   = f"{URL_BASE}/Vacantes/Index#no-back-button"
+URL_BASE    = "https://sime.educaciontuc.gov.ar:8089"
+URL_LISTA   = f"{URL_BASE}/Vacantes/Inscripcion#no-back-button"
 URL_DETALLE = f"{URL_BASE}/Vacantes/Inscripcion"   # + ?id=PDVC-XXXXX
-
+ 
 if not TOKEN or not CHAT_ID:
     print("❌ ERROR: Faltan TELEGRAM_TOKEN o TELEGRAM_CHAT_ID")
     exit(1)
